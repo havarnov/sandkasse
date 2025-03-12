@@ -1,0 +1,27 @@
+package plugnplay:plugnplay;
+
+interface runtime {
+    variant request {
+        a,
+        b(string),
+    }
+
+    variant error {
+        a,
+        b(string),
+    }
+
+    variant response {
+        a,
+        b(string),
+    }
+
+    resource ctx {
+        constructor();
+        eval: func(req: request) -> result<response, error>;
+    }
+}
+
+world plugnplay {
+    export runtime;
+}
