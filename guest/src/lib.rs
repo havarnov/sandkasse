@@ -39,6 +39,7 @@ impl GuestCtx for RuntimeCtx {
                 Ok(Response::B(format!("result: {:?}", v)))
             },
             Request::A => Ok(Response::A {}),
+            Request::C(_) => todo!(),
         }
     }
 }

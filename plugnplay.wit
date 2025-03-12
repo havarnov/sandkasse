@@ -4,6 +4,7 @@ interface runtime {
     variant request {
         a,
         b(string),
+        c(tuple<string, string>),
     }
 
     variant error {

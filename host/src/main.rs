@@ -27,6 +27,7 @@ fn main() {
     let mut config = Config::default();
     config.wasm_component_model(true);
     config.debug_info(true);
+    config.consume_fuel(true);
     let engine = Engine::new(&config).expect("engine");
     let component = Component::from_file(&engine, "../guest/target/wasm32-wasip1/release/guest.wasm").expect("load component");
     let mut linker = Linker::<State>::new(&engine);
@@ -41,15 +42,25 @@ fn main() {
         },
     );
 
+
     let bindings = Plugnplay::instantiate(&mut store, &component, &linker).expect("instantiate playground");
+
+    store.set_fuel(2_000_000).expect("set fuel");
 
     let plugin = bindings.interface0.ctx();
     let ctx = plugin.call_constructor(&mut store).expect("constructor");
 
+    println!("{:?}", store.get_fuel());
+    store.set_fuel(100_000).expect("set fuel");
+
     let request = Request::B(format!("function x() {{ return 1 + 42; }}; x()"));
     println!("{:?}", plugin.call_eval(&mut store, ctx, &request));
 
+    println!("{:?}", store.get_fuel());
+
     let request = Request::B(format!("x() + 9"));
     println!("{:?}", plugin.call_eval(&mut store, ctx, &request));
+
+    println!("{:?}", store.get_fuel());
 }
 
