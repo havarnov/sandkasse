@@ -3,11 +3,11 @@ use wasmtime::{Engine, Store, Config};
 use wasmtime::component::{ResourceTable, Linker};
 use wasmtime_wasi::{IoView, WasiCtx, WasiView, WasiCtxBuilder};
 
-use exports::plugnplay::plugnplay::runtime::*;
+use exports::havarnov::sandkasse::runtime::*;
 
 bindgen!({
     path: "..",
-    world: "plugnplay",
+    world: "sandkasse",
 });
 
 struct State {
@@ -36,7 +36,7 @@ impl From<wasmtime::Error> for Error {
 
 pub struct Runtime {
     store: Store<State>,
-    package: Plugnplay,
+    package: Sandkasse,
 }
 
 pub struct Context<'a> {
@@ -65,7 +65,7 @@ impl Runtime {
         let mut builder = WasiCtxBuilder::new();
 
         // TODO: config
-        // builder.inherit_stdio();
+        builder.inherit_stdio();
 
         let mut store = Store::new(
             &engine,
@@ -76,7 +76,7 @@ impl Runtime {
         );
         // store.set_fuel(4_000_000).expect("set fuel");
 
-        let package = Plugnplay::instantiate(&mut store, &component, &linker)?;
+        let package = Sandkasse::instantiate(&mut store, &component, &linker)?;
 
         Ok(Runtime { store, package, })
     }
@@ -90,8 +90,14 @@ impl Runtime {
 
 impl<'a> Context<'a> {
     pub fn eval(&mut self, script: String) -> Result<(), Error> {
-        let request = Request::B(script);
-        println!("{:?}", self.ctx.call_eval(&mut self.store, self.resource, &request));
+        let request = Request::Eval(script);
+        println!("{:?}", self.ctx.call_handle(&mut self.store, self.resource, &request));
+        Ok(())
+    }
+
+    pub fn register(&mut self, name: String, is_string: bool) -> Result<(), Error> {
+        let request = Request::Register((name, is_string));
+        println!("{:?}", self.ctx.call_handle(&mut self.store, self.resource, &request));
         Ok(())
     }
 }

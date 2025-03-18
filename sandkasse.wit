@@ -1,0 +1,25 @@
+package havarnov:sandkasse;
+
+interface runtime {
+    variant request {
+        eval(string),
+        register(tuple<string, bool>),
+    }
+
+    variant error {
+        message(string),
+    }
+
+    variant response {
+        todo(string),
+    }
+
+    resource ctx {
+        constructor();
+        handle: func(req: request) -> result<response, error>;
+    }
+}
+
+world sandkasse {
+    export runtime;
+}
