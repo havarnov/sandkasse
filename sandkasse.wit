@@ -3,7 +3,6 @@ package havarnov:sandkasse;
 interface runtime {
     variant request {
         eval(string),
-        register(tuple<string, bool>),
     }
 
     variant error {
@@ -11,12 +10,18 @@ interface runtime {
     }
 
     variant response {
-        todo(string),
+        int(s32),
+    }
+
+    record register-params {
+        name: string,
+        is-int: bool,
     }
 
     resource ctx {
         constructor();
         handle: func(req: request) -> result<response, error>;
+        register: func(req: register-params) -> result<bool, error>;
     }
 }
 

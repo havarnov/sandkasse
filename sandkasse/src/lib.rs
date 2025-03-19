@@ -26,6 +26,7 @@ impl WasiView for State {
 #[derive(Debug)]
 pub enum Error {
     Init(String),
+    WrongType(String),
 }
 
 impl From<wasmtime::Error> for Error {
@@ -88,16 +89,47 @@ impl Runtime {
     }
 }
 
+
+enum Value {
+    Void,
+    Int(i32),
+}
+
+pub trait FromJs : Sized {
+    fn from_js(value: Value) -> Result<Self, Error>;
+}
+
+impl FromJs for () {
+    fn from_js(value: Value) -> Result<Self, Error> {
+        match value {
+            Value::Void => Ok(()),
+            _ => Err(Error::WrongType(format!("expected void"))),
+        }
+    }
+}
+
+impl FromJs for i32 {
+    fn from_js(value: Value) -> Result<Self, Error> {
+        match value {
+            Value::Int(int) => Ok(int),
+            _ => Err(Error::WrongType(format!("expected int"))),
+        }
+    }
+}
+
 impl<'a> Context<'a> {
-    pub fn eval(&mut self, script: String) -> Result<(), Error> {
+    pub fn eval<V: FromJs>(&mut self, script: String) -> Result<V, Error> {
         let request = Request::Eval(script);
-        println!("{:?}", self.ctx.call_handle(&mut self.store, self.resource, &request));
-        Ok(())
+        let response = self.ctx.call_handle(&mut self.store, self.resource, &request)?;
+        match response {
+            Ok(Response::Int(int)) => V::from_js(Value::Int(int)),
+            _ => todo!("todo")
+        }
     }
 
-    pub fn register(&mut self, name: String, is_string: bool) -> Result<(), Error> {
-        let request = Request::Register((name, is_string));
-        println!("{:?}", self.ctx.call_handle(&mut self.store, self.resource, &request));
+    pub fn register(&mut self, name: String, is_int: bool) -> Result<(), Error> {
+        let request = RegisterParams { name, is_int, };
+        let _response = self.ctx.call_register(&mut self.store,self.resource, &request)?;
         Ok(())
     }
 }

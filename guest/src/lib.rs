@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rquickjs::{Context, Runtime, Function, Result as RQuickJsResult};
 
-use exports::havarnov::sandkasse::runtime::{Guest, GuestCtx, Request, Response, Error};
+use exports::havarnov::sandkasse::runtime::{Guest, GuestCtx, Request, Response, Error, RegisterParams};
 
 wit_bindgen::generate!({ // W: call to unsafe function `_export_call_cabi` is unsafe and requires unsafe block: call to unsafe function
     path: "..",
@@ -40,29 +40,30 @@ impl GuestCtx for RuntimeCtx {
         RuntimeCtx { ctx: context }
     }
 
+    fn register(&self, params: RegisterParams) -> Result<bool, Error> {
+        let name = params.name.clone();
+        self.ctx.with(|ctx| -> RQuickJsResult<()> {
+            let global = ctx.globals();
+            global.set(
+                params.name.to_string(),
+                if params.is_int {
+                    Function::new(ctx.clone(), move |input: String| handle_registered(name.clone(), &ctx, input))?.with_name(params.name.to_string())?
+                } else {
+                    Function::new(ctx.clone(), move |input: i32| handle_registered(name.clone(), &ctx, input))?.with_name(params.name.to_string())?
+                },
+            )?;
+            Ok(())
+        })?;
+        Ok(true)
+    }
+
     fn handle(&self, req: Request) -> Result<Response, Error> {
         match req {
             Request::Eval(input) => {
                 let v = self.ctx.with(|ctx| {
                     ctx.eval::<i32, _>(input).expect("woot")
                 });
-                Ok(Response::Todo(format!("{:?}", v)))
-            },
-            Request::Register((name, is_string)) => {
-                let x = name.to_string();
-                self.ctx.with(|ctx| -> RQuickJsResult<()> {
-                    let global = ctx.globals();
-                    global.set(
-                        name.to_string(),
-                        if is_string {
-                            Function::new(ctx.clone(), move |input: String| handle_registered(x.clone(), &ctx, input))?.with_name(name.to_string())?
-                        } else {
-                            Function::new(ctx.clone(), move |input: i32| handle_registered(x.clone(), &ctx, input))?.with_name(name.to_string())?
-                        },
-                    )?;
-                    Ok(())
-                })?;
-                Ok(Response::Todo(format!("Registered a new function: {}", name)))
+                Ok(Response::Int(v))
             },
         }
     }
