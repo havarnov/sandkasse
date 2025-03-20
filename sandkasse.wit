@@ -1,16 +1,22 @@
 package havarnov:sandkasse;
 
 interface runtime {
-    variant request {
-        eval(string),
-    }
-
     variant error {
         message(string),
     }
 
+    variant response-type {
+        void,
+        int,
+        str,
+        boolean,
+    }
+
     variant response {
+        void,
         int(s32),
+        str(string),
+        boolean(bool),
     }
 
     record register-params {
@@ -18,9 +24,14 @@ interface runtime {
         is-int: bool,
     }
 
+    record eval-params {
+        source: string,
+        response-type: response-type,
+    }
+
     resource ctx {
         constructor();
-        handle: func(req: request) -> result<response, error>;
+        eval: func(req: eval-params) -> result<response, error>;
         register: func(req: register-params) -> result<bool, error>;
     }
 }

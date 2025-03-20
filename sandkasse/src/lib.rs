@@ -90,13 +90,16 @@ impl Runtime {
 }
 
 
-enum Value {
+pub enum Value {
     Void,
     Int(i32),
+    Bool(bool),
+    Str(String),
 }
 
 pub trait FromJs : Sized {
     fn from_js(value: Value) -> Result<Self, Error>;
+    fn response_type() -> ResponseType;
 }
 
 impl FromJs for () {
@@ -105,6 +108,23 @@ impl FromJs for () {
             Value::Void => Ok(()),
             _ => Err(Error::WrongType(format!("expected void"))),
         }
+    }
+
+    fn response_type() -> ResponseType {
+        ResponseType::Void
+    }
+}
+
+impl FromJs for bool {
+    fn from_js(value: Value) -> Result<Self, Error> {
+        match value {
+            Value::Bool(v) => Ok(v),
+            _ => Err(Error::WrongType(format!("expected bool"))),
+        }
+    }
+
+    fn response_type() -> ResponseType {
+        ResponseType::Boolean
     }
 }
 
@@ -115,15 +135,35 @@ impl FromJs for i32 {
             _ => Err(Error::WrongType(format!("expected int"))),
         }
     }
+
+    fn response_type() -> ResponseType {
+        ResponseType::Int
+    }
+}
+
+impl FromJs for String {
+    fn from_js(value: Value) -> Result<Self, Error> {
+        match value {
+            Value::Str(v) => Ok(v),
+            _ => Err(Error::WrongType(format!("expected string"))),
+        }
+    }
+
+    fn response_type() -> ResponseType {
+        ResponseType::Str
+    }
 }
 
 impl<'a> Context<'a> {
-    pub fn eval<V: FromJs>(&mut self, script: String) -> Result<V, Error> {
-        let request = Request::Eval(script);
-        let response = self.ctx.call_handle(&mut self.store, self.resource, &request)?;
+    pub fn eval<V: FromJs>(&mut self, source: String) -> Result<V, Error> {
+        let request = EvalParams { source, response_type: V::response_type(), };
+        let response = self.ctx.call_eval(&mut self.store, self.resource, &request)?;
         match response {
-            Ok(Response::Int(int)) => V::from_js(Value::Int(int)),
-            _ => todo!("todo")
+            Ok(Response::Void) => V::from_js(Value::Void),
+            Ok(Response::Int(v)) => V::from_js(Value::Int(v)),
+            Ok(Response::Boolean(v)) => V::from_js(Value::Bool(v)),
+            Ok(Response::Str(v)) => V::from_js(Value::Str(v)),
+            Err(e) => Err(Error::WrongType(format!("{:?}", e))),
         }
     }
 

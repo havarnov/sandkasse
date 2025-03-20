@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rquickjs::{Context, Runtime, Function, Result as RQuickJsResult};
 
-use exports::havarnov::sandkasse::runtime::{Guest, GuestCtx, Request, Response, Error, RegisterParams};
+use exports::havarnov::sandkasse::runtime::{Guest, GuestCtx, EvalParams, Response, ResponseType, Error, RegisterParams};
 
 wit_bindgen::generate!({ // W: call to unsafe function `_export_call_cabi` is unsafe and requires unsafe block: call to unsafe function
     path: "..",
@@ -30,7 +30,7 @@ fn handle_registered<'a>(s: String, ctx: &rquickjs::Ctx<'a>, input: impl rquickj
 }
 
 impl std::convert::From<rquickjs::Error> for exports::havarnov::sandkasse::runtime::Error {
-    fn from(_: rquickjs::Error) -> Self { todo!() }
+    fn from(e: rquickjs::Error) -> Self { exports::havarnov::sandkasse::runtime::Error::Message(format!("{:?}", e)) }
 }
 
 impl GuestCtx for RuntimeCtx {
@@ -57,14 +57,33 @@ impl GuestCtx for RuntimeCtx {
         Ok(true)
     }
 
-    fn handle(&self, req: Request) -> Result<Response, Error> {
-        match req {
-            Request::Eval(input) => {
-                let v = self.ctx.with(|ctx| {
-                    ctx.eval::<i32, _>(input).expect("woot")
-                });
-                Ok(Response::Int(v))
+    fn eval(&self, req: EvalParams) -> Result<Response, Error> {
+        let value = match req.response_type {
+            ResponseType::Void => {
+                self.ctx.with(|ctx| -> RQuickJsResult<Response> {
+                    _ = ctx.eval::<(), _>(req.source)?;
+                    Ok(Response::Void)
+                })?
             },
-        }
+            ResponseType::Int => {
+                self.ctx.with(|ctx| -> RQuickJsResult<Response> {
+                    let value = ctx.eval::<i32, _>(req.source)?;
+                    Ok(Response::Int(value))
+                })?
+            }
+            ResponseType::Boolean => {
+                self.ctx.with(|ctx| -> RQuickJsResult<Response> {
+                    let value = ctx.eval::<bool, _>(req.source)?;
+                    Ok(Response::Boolean(value))
+                })?
+            }
+            ResponseType::Str => {
+                self.ctx.with(|ctx| -> RQuickJsResult<Response> {
+                    let value = ctx.eval::<String, _>(req.source)?;
+                    Ok(Response::Str(value))
+                })?
+            }
+        };
+        Ok(value)
     }
 }
