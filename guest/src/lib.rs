@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use rquickjs::{Context, Function, Result as RQuickJsResult, Runtime};
 
 use exports::havarnov::sandkasse::runtime::{
@@ -11,9 +9,7 @@ wit_bindgen::generate!({ // W: call to unsafe function `_export_call_cabi` is un
     world: "sandkasse",
 });
 
-struct Component {
-    ctx: Context,
-}
+struct Component;
 
 export!(Component);
 
