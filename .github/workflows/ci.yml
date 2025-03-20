@@ -22,6 +22,11 @@ jobs:
         version: latest
         platform: x64
 
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-wasip1
+          components: rustfmt, clippy
+
     - run: cargo component build
 
     - name: Build
