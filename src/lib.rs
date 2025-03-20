@@ -6,7 +6,7 @@ use wasmtime_wasi::{IoView, WasiCtx, WasiView, WasiCtxBuilder};
 use exports::havarnov::sandkasse::runtime::*;
 
 bindgen!({
-    path: "..",
+    path: ".",
     world: "sandkasse",
 });
 
@@ -58,7 +58,7 @@ impl Runtime {
         let engine = Engine::new(&config)?;
 
         // TODO: load from binary
-        let component = Component::from_file(&engine, "../guest/target/wasm32-wasip1/release/guest.wasm")?;
+        let component = Component::from_file(&engine, "./guest/target/wasm32-wasip1/release/guest.wasm")?;
 
         let mut linker = Linker::<State>::new(&engine);
         wasmtime_wasi::add_to_linker_sync(&mut linker)?;
