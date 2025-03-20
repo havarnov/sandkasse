@@ -1,7 +1,7 @@
 use wasmtime::component::*;
-use wasmtime::{Engine, Store, Config};
-use wasmtime::component::{ResourceTable, Linker};
-use wasmtime_wasi::{IoView, WasiCtx, WasiView, WasiCtxBuilder};
+use wasmtime::component::{Linker, ResourceTable};
+use wasmtime::{Config, Engine, Store};
+use wasmtime_wasi::{IoView, WasiCtx, WasiCtxBuilder, WasiView};
 
 use exports::havarnov::sandkasse::runtime::*;
 
@@ -16,11 +16,15 @@ struct State {
 }
 
 impl IoView for State {
-    fn table(&mut self) -> &mut ResourceTable { &mut self.table }
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.table
+    }
 }
 
 impl WasiView for State {
-    fn ctx(&mut self) -> &mut WasiCtx { &mut self.ctx }
+    fn ctx(&mut self) -> &mut WasiCtx {
+        &mut self.ctx
+    }
 }
 
 #[derive(Debug)]
@@ -58,7 +62,8 @@ impl Runtime {
         let engine = Engine::new(&config)?;
 
         // TODO: load from binary
-        let component = Component::from_file(&engine, "./guest/target/wasm32-wasip1/release/guest.wasm")?;
+        let bytes = include_bytes!("../guest/target/wasm32-wasip1/release/guest.wasm");
+        let component = Component::from_binary(&engine, bytes)?;
 
         let mut linker = Linker::<State>::new(&engine);
         wasmtime_wasi::add_to_linker_sync(&mut linker)?;
@@ -79,16 +84,19 @@ impl Runtime {
 
         let package = Sandkasse::instantiate(&mut store, &component, &linker)?;
 
-        Ok(Runtime { store, package, })
+        Ok(Runtime { store, package })
     }
 
     pub fn create_ctx<'a>(&'a mut self) -> Result<Context<'a>, Error> {
         let ctx = self.package.interface0.ctx();
         let resource = ctx.call_constructor(&mut self.store)?;
-        Ok(Context { store: &mut self.store, ctx: ctx, resource, })
+        Ok(Context {
+            store: &mut self.store,
+            ctx: ctx,
+            resource,
+        })
     }
 }
-
 
 pub enum Value {
     Void,
@@ -97,7 +105,7 @@ pub enum Value {
     Str(String),
 }
 
-pub trait FromJs : Sized {
+pub trait FromJs: Sized {
     fn from_js(value: Value) -> Result<Self, Error>;
     fn response_type() -> ResponseType;
 }
@@ -156,8 +164,13 @@ impl FromJs for String {
 
 impl<'a> Context<'a> {
     pub fn eval<V: FromJs>(&mut self, source: String) -> Result<V, Error> {
-        let request = EvalParams { source, response_type: V::response_type(), };
-        let response = self.ctx.call_eval(&mut self.store, self.resource, &request)?;
+        let request = EvalParams {
+            source,
+            response_type: V::response_type(),
+        };
+        let response = self
+            .ctx
+            .call_eval(&mut self.store, self.resource, &request)?;
         match response {
             Ok(Response::Void) => V::from_js(Value::Void),
             Ok(Response::Int(v)) => V::from_js(Value::Int(v)),
@@ -168,9 +181,10 @@ impl<'a> Context<'a> {
     }
 
     pub fn register(&mut self, name: String, is_int: bool) -> Result<(), Error> {
-        let request = RegisterParams { name, is_int, };
-        let _response = self.ctx.call_register(&mut self.store,self.resource, &request)?;
+        let request = RegisterParams { name, is_int };
+        let _response = self
+            .ctx
+            .call_register(&mut self.store, self.resource, &request)?;
         Ok(())
     }
 }
-
