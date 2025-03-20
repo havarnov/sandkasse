@@ -27,7 +27,5 @@ jobs:
         target: wasm32-wasip1
         components: rustfmt, clippy
 
-    - run: cargo component build
-
     - name: Build
       run: cargo build --verbose
