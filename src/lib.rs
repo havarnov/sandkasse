@@ -87,12 +87,12 @@ impl Runtime {
         Ok(Runtime { store, package })
     }
 
-    pub fn create_ctx<'a>(&'a mut self) -> Result<Context<'a>, Error> {
+    pub fn create_ctx(&mut self) -> Result<Context<'_>, Error> {
         let ctx = self.package.interface0.ctx();
         let resource = ctx.call_constructor(&mut self.store)?;
         Ok(Context {
             store: &mut self.store,
-            ctx: ctx,
+            ctx,
             resource,
         })
     }
@@ -114,7 +114,7 @@ impl FromJs for () {
     fn from_js(value: Value) -> Result<Self, Error> {
         match value {
             Value::Void => Ok(()),
-            _ => Err(Error::WrongType(format!("expected void"))),
+            _ => Err(Error::WrongType("expected void".to_string())),
         }
     }
 
@@ -127,7 +127,7 @@ impl FromJs for bool {
     fn from_js(value: Value) -> Result<Self, Error> {
         match value {
             Value::Bool(v) => Ok(v),
-            _ => Err(Error::WrongType(format!("expected bool"))),
+            _ => Err(Error::WrongType("expected bool".to_string())),
         }
     }
 
@@ -140,7 +140,7 @@ impl FromJs for i32 {
     fn from_js(value: Value) -> Result<Self, Error> {
         match value {
             Value::Int(int) => Ok(int),
-            _ => Err(Error::WrongType(format!("expected int"))),
+            _ => Err(Error::WrongType("expected int".to_string())),
         }
     }
 
@@ -153,7 +153,7 @@ impl FromJs for String {
     fn from_js(value: Value) -> Result<Self, Error> {
         match value {
             Value::Str(v) => Ok(v),
-            _ => Err(Error::WrongType(format!("expected string"))),
+            _ => Err(Error::WrongType("expected string".to_string())),
         }
     }
 
@@ -162,7 +162,7 @@ impl FromJs for String {
     }
 }
 
-impl<'a> Context<'a> {
+impl Context<'_> {
     pub fn eval<V: FromJs>(&mut self, source: String) -> Result<V, Error> {
         let request = EvalParams {
             source,

@@ -54,12 +54,12 @@ impl GuestCtx for RuntimeCtx {
                     Function::new(ctx.clone(), move |input: String| {
                         handle_registered(name.clone(), &ctx, input)
                     })?
-                    .with_name(params.name.to_string())?
+                    .with_name(&params.name)?
                 } else {
                     Function::new(ctx.clone(), move |input: i32| {
                         handle_registered(name.clone(), &ctx, input)
                     })?
-                    .with_name(params.name.to_string())?
+                    .with_name(&params.name)?
                 },
             )?;
             Ok(())
@@ -70,7 +70,7 @@ impl GuestCtx for RuntimeCtx {
     fn eval(&self, req: EvalParams) -> Result<Response, Error> {
         let value = match req.response_type {
             ResponseType::Void => self.ctx.with(|ctx| -> RQuickJsResult<Response> {
-                _ = ctx.eval::<(), _>(req.source)?;
+                ctx.eval::<(), _>(req.source)?;
                 Ok(Response::Void)
             })?,
             ResponseType::Int => self.ctx.with(|ctx| -> RQuickJsResult<Response> {
