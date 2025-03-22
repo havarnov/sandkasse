@@ -26,6 +26,7 @@ fn handle_registered<'a>(
     ctx: &rquickjs::Ctx<'a>,
     input: impl rquickjs::IntoJs<'a>,
 ) -> i32 {
+    registered_callback(&s, &vec![]).expect("registered_callback");
     let value = input.into_js(ctx);
     println!("called {} with {:?}", s, value);
     666
@@ -50,17 +51,10 @@ impl GuestCtx for RuntimeCtx {
             let global = ctx.globals();
             global.set(
                 params.name.to_string(),
-                if params.is_int {
-                    Function::new(ctx.clone(), move |input: String| {
-                        handle_registered(name.clone(), &ctx, input)
-                    })?
-                    .with_name(&params.name)?
-                } else {
-                    Function::new(ctx.clone(), move |input: i32| {
-                        handle_registered(name.clone(), &ctx, input)
-                    })?
-                    .with_name(&params.name)?
-                },
+                Function::new(ctx.clone(), move || {
+                    handle_registered(name.clone(), &ctx, ())
+                })?
+                .with_name(&params.name)?
             )?;
             Ok(())
         })?;

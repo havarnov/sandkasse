@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use wasmtime::component::*;
 use wasmtime::component::{Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
@@ -13,6 +16,7 @@ bindgen!({
 struct State {
     ctx: WasiCtx,
     table: ResourceTable,
+    callbacks: HashMap<String, Arc<Mutex<Box<dyn Callback + Send + 'static>>>>,
 }
 
 impl IoView for State {
@@ -44,6 +48,18 @@ pub struct Runtime {
     package: Sandkasse,
 }
 
+pub trait Callback {
+    fn call(&self, params: Vec<CallbackParam>) -> Result<CallbackResponse, CallbackError>;
+}
+
+impl<T: Fn() -> ()> Callback for T {
+    fn call(&self, _params: Vec<CallbackParam>) -> Result<CallbackResponse, CallbackError>
+    {
+        (self as &dyn Fn() -> ())();
+        Ok(CallbackResponse::Void)
+    }
+}
+
 pub struct Context<'a> {
     store: &'a mut Store<State>,
     ctx: GuestCtx<'a>,
@@ -67,6 +83,7 @@ impl Runtime {
 
         let mut linker = Linker::<State>::new(&engine);
         wasmtime_wasi::add_to_linker_sync(&mut linker)?;
+        Sandkasse::add_to_linker(&mut linker, |state: &mut State| state)?;
 
         let mut builder = WasiCtxBuilder::new();
 
@@ -78,22 +95,24 @@ impl Runtime {
             State {
                 ctx: builder.build(),
                 table: ResourceTable::new(),
+                callbacks: HashMap::new(),
             },
         );
         // store.set_fuel(4_000_000).expect("set fuel");
 
-        let package = Sandkasse::instantiate(&mut store, &component, &linker)?;
+       let package = Sandkasse::instantiate(&mut store, &component, &linker)?;
 
-        Ok(Runtime { store, package })
+        Ok(Runtime { store, package, })
     }
 
-    pub fn create_ctx(&mut self) -> Result<Context<'_>, Error> {
+    pub fn create_ctx<'a>(&'a mut self) -> Result<Context<'a>, Error> {
         let ctx = self.package.interface0.ctx();
         let resource = ctx.call_constructor(&mut self.store)?;
+
         Ok(Context {
             store: &mut self.store,
-            ctx,
-            resource,
+            ctx: ctx,
+            resource: resource,
         })
     }
 }
@@ -162,6 +181,14 @@ impl FromJs for String {
     }
 }
 
+impl SandkasseImports for State {
+    fn registered_callback(&mut self, name: String, params: Vec<CallbackParam>) -> Result<CallbackResponse, CallbackError> {
+        let callback = self.callbacks.get(&name).expect("get");
+        let callback = callback.lock().unwrap();
+        callback.call(params)
+    }
+}
+
 impl Context<'_> {
     pub fn eval<V: FromJs>(&mut self, source: String) -> Result<V, Error> {
         let request = EvalParams {
@@ -180,6 +207,17 @@ impl Context<'_> {
         }
     }
 
+    pub fn register<F: Callback + Send + 'static>(&mut self, name: String, callback: F) -> Result<(), Error> {
+        let callback: Arc<Mutex<Box<dyn Callback + Send + 'static>>> = Arc::new(Mutex::new(Box::new(callback)));
+        self.store.data_mut().callbacks.insert(name.clone(), callback);
+        let request = RegisterParams { name, };
+        let _response = self
+            .ctx
+            .call_register(&mut self.store, self.resource, &request)?;
+        Ok(())
+    }
+
+    /*
     pub fn register(&mut self, name: String, is_int: bool) -> Result<(), Error> {
         let request = RegisterParams { name, is_int };
         let _response = self
@@ -187,4 +225,5 @@ impl Context<'_> {
             .call_register(&mut self.store, self.resource, &request)?;
         Ok(())
     }
+    */
 }

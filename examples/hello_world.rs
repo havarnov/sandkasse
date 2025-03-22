@@ -19,7 +19,8 @@ fn main() {
     println!("value: {:?}", v);
 
     // POC
-    // ctx.register("double", |i: i32| { i * 2 });
+    ctx.register("double".to_string(), || { println!("hello from the other side"); }).expect("register");
+    ctx.eval::<()>(format!("double();")).expect("eval");
     // let value = ctx.eval::<i32>(format!("double(42);"))?;
     // assert!(value == 84);
 }

@@ -21,7 +21,6 @@ interface runtime {
 
     record register-params {
         name: string,
-        is-int: bool,
     }
 
     record eval-params {
@@ -37,5 +36,23 @@ interface runtime {
 }
 
 world sandkasse {
+    variant callback-param {
+        int(s32),
+        str(string),
+        boolean(bool),
+    }
+
+    variant callback-response {
+        void,
+        int(s32),
+        str(string),
+        boolean(bool),
+    }
+
+    variant callback-error {
+        message(string),
+    }
+
+    import registered-callback: func(name: string, params: list<callback-param>) -> result<callback-response, callback-error>;
     export runtime;
 }
