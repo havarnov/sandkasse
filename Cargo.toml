@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+fn_ops = "0.1.0"
 wasmtime = "30.0.2"
 wasmtime-wasi = "30.0.2"

@@ -52,13 +52,52 @@ pub trait Callback {
     fn call(&self, params: Vec<CallbackParam>) -> Result<CallbackResponse, CallbackError>;
 }
 
-impl<T: Fn() -> ()> Callback for T {
+struct F1<T: Fn() -> ()>(T);
+
+impl<T> Callback for F1<T>
+    where T : Fn() -> ()
+{
     fn call(&self, _params: Vec<CallbackParam>) -> Result<CallbackResponse, CallbackError>
     {
-        (self as &dyn Fn() -> ())();
+        (self.0)();
         Ok(CallbackResponse::Void)
     }
 }
+
+struct F2<T: Fn(i32) -> ()>(T);
+
+impl<T> Callback for F2<T>
+    where T : Fn(i32) -> ()
+{
+    fn call(&self, params: Vec<CallbackParam>) -> Result<CallbackResponse, CallbackError>
+    {
+        if params.len() != 1 {
+            return Err(CallbackError::Message("foobar".to_string()));
+        }
+
+        let fst = &params[0];
+        let fst = if let CallbackParam::Int(fst) = fst { fst } else {
+            return Err(CallbackError::Message("foobar2".to_string()));
+        };
+
+        (self.0)(*fst);
+        Ok(CallbackResponse::Void)
+    }
+}
+
+/*
+struct F2<T: fn_ops::Fn<i32>>(T);
+
+impl<T> Callback for F2<T>
+    where T : fn_ops::Fn<i32>
+{
+    fn call(&self, _params: Vec<CallbackParam>) -> Result<CallbackResponse, CallbackError>
+    {
+        self.0.call(32);
+        Ok(CallbackResponse::Void)
+    }
+}
+*/
 
 pub struct Context<'a> {
     store: &'a mut Store<State>,
@@ -206,9 +245,10 @@ impl Context<'_> {
             Err(e) => Err(Error::WrongType(format!("{:?}", e))),
         }
     }
-
-    pub fn register<F: Callback + Send + 'static>(&mut self, name: String, callback: F) -> Result<(), Error> {
-        let callback: Arc<Mutex<Box<dyn Callback + Send + 'static>>> = Arc::new(Mutex::new(Box::new(callback)));
+    pub fn register_2(&mut self, name: String, callback: impl Fn(i32) -> () + Send + 'static) -> Result<(), Error>
+    {
+        let callback = F2(callback);
+        let callback: Arc<Mutex<Box<(dyn Callback + Send + 'static)>>> = Arc::new(Mutex::new(Box::new(callback)));
         self.store.data_mut().callbacks.insert(name.clone(), callback);
         let request = RegisterParams { name, };
         let _response = self
@@ -217,13 +257,16 @@ impl Context<'_> {
         Ok(())
     }
 
-    /*
-    pub fn register(&mut self, name: String, is_int: bool) -> Result<(), Error> {
-        let request = RegisterParams { name, is_int };
+
+    pub fn register(&mut self, name: String, callback: impl Fn() -> () + Send + 'static) -> Result<(), Error>
+    {
+        let callback = F1(callback);
+        let callback: Arc<Mutex<Box<(dyn Callback + Send + 'static)>>> = Arc::new(Mutex::new(Box::new(callback)));
+        self.store.data_mut().callbacks.insert(name.clone(), callback);
+        let request = RegisterParams { name, };
         let _response = self
             .ctx
             .call_register(&mut self.store, self.resource, &request)?;
         Ok(())
     }
-    */
 }

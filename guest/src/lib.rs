@@ -26,7 +26,7 @@ fn handle_registered<'a>(
     ctx: &rquickjs::Ctx<'a>,
     input: impl rquickjs::IntoJs<'a>,
 ) -> i32 {
-    registered_callback(&s, &vec![]).expect("registered_callback");
+    registered_callback(&s, &vec![CallbackParam::Int(44)]).expect("registered_callback");
     let value = input.into_js(ctx);
     println!("called {} with {:?}", s, value);
     666
