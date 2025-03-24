@@ -22,12 +22,9 @@ fn main() {
     let v: String = ctx.eval(format!("\"string from js\";")).expect("eval");
     println!("value: {:?}", v);
 
-    // POC
-    ctx.register("double".to_string(), || { println!("hello from the other side"); }).expect("register");
-    // ctx.register("double".to_string(), p);
-    ctx.eval::<()>(format!("double();")).expect("eval");
-    // let value = ctx.eval::<i32>(format!("double(42);"))?;
-    // assert!(value == 84);
-    ctx.register_2("triple".to_string(), move |i: i32| { println!("hello from the other side: {:?}", i); }).expect("register");
-    ctx.eval::<()>(format!("triple(32);")).expect("eval");
+    ctx.register("x".to_string(), || { println!("hello from the other side"); }).expect("register");
+    ctx.eval::<()>(format!("x();")).expect("eval");
+
+    ctx.register("y".to_string(), |i: i32| { println!("hello from the other side: {:?}", i); }).expect("register");
+    ctx.eval::<()>(format!("y(42);")).expect("eval");
 }
