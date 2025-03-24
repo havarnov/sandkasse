@@ -19,8 +19,15 @@ interface runtime {
         boolean(bool),
     }
 
+    variant param-type {
+        int,
+        str,
+        boolean,
+    }
+
     record register-params {
         name: string,
+        param-types: list<param-type>,
     }
 
     record eval-params {

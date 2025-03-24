@@ -1,7 +1,6 @@
 use sandkasse::Runtime;
-
-fn p() {
-    println!("p");
+fn print() {
+    println!("print");
 }
 
 fn main() {
@@ -27,4 +26,14 @@ fn main() {
 
     ctx.register("y".to_string(), |i: i32| { println!("hello from the other side: {:?}", i); }).expect("register");
     ctx.eval::<()>(format!("y(42);")).expect("eval");
+
+    ctx.register("z".to_string(), |i: i32, j: i32| { println!("hello from the other side: {:?}, {:?}", i, j); }).expect("register");
+    ctx.eval::<()>(format!("z(42, 22);")).expect("eval");
+
+    ctx.register("add".to_string(), |i: i32, j: i32| { i + j }).expect("register");
+    let v = ctx.eval::<i32>(format!("add(42, 22);")).expect("eval");
+    println!("value: {:?}", v);
+
+    ctx.register("print".to_string(), print).expect("register");
+    ctx.eval::<()>(format!("print();")).expect("eval");
 }

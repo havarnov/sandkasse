@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use wasmtime::component::*;
@@ -229,14 +230,18 @@ impl SandkasseImports for State {
         let callback = callback.lock().unwrap();
         if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<()> + Send + 'static>>() {
             let callback = callback.downcast_ref::<Box<dyn Callback<()> + Send + 'static>>().expect("downcast");
-            callback.call(Params {}).expect("foobar");
+            return Ok(callback.call(Params { inner: VecDeque::from(params), }).expect("foobar"));
         }
         else if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<i32> + Send + 'static>>() {
             let callback = callback.downcast_ref::<Box<dyn Callback<i32> + Send + 'static>>().expect("downcast");
-            callback.call(Params {}).expect("foobar");
+            return Ok(callback.call(Params { inner: VecDeque::from(params), }).expect("foobar"));
+        }
+        else if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<(i32, i32)> + Send + 'static>>() {
+            let callback = callback.downcast_ref::<Box<dyn Callback<(i32, i32)> + Send + 'static>>().expect("downcast");
+            return Ok(callback.call(Params { inner: VecDeque::from(params), }).expect("foobar"));
         }
 
-        Ok(CallbackResponse::Void)
+        todo!("register...");
     }
 }
 
@@ -267,8 +272,25 @@ impl Context<'_> {
         let callback: Box<dyn Callback<P> + Send + 'static> = Box::new(callback);
         let callback: Box<dyn std::any::Any + Send + 'static> = Box::new(callback);
         // let callback = *callback.downcast::<Box<dyn Callback<dyn std::any::Any + Send + 'static> + Send + 'static>>().unwrap();
+
+
+        let param_types = if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<()> + Send + 'static>>() {
+            vec![]
+        }
+        else if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<i32> + Send + 'static>>() {
+            vec![ParamType::Int]
+        }
+        else if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<(i32, i32)> + Send + 'static>>() {
+            vec![ParamType::Int, ParamType::Int]
+        }
+        else {
+            todo!("param types");
+        };
+
         self.store.data_mut().callbacks.insert(name.clone(), Arc::new(Mutex::new(callback)));
-        let request = RegisterParams { name, };
+
+
+        let request = RegisterParams { name, param_types };
         let _response = self
             .ctx
             .call_register(&mut self.store, self.resource, &request)?;
@@ -313,46 +335,65 @@ impl Callback for fn() {
 
 */
 
-pub struct Params;
-pub trait FromParams {}
-pub trait IntoCallbackResponse {}
+pub struct Params
+{
+    inner: VecDeque<CallbackParam>,
+}
+
+pub trait FromParams: Sized {
+    fn from(params: &mut Params) -> Self;
+}
+
+pub trait IntoCallbackResponse {
+    fn into_response(&self) -> CallbackResponse;
+}
 
 pub trait Callback<P: ?Sized + std::any::Any + 'static> : Send
 {
     fn call(&self, params: Params) -> Result<CallbackResponse, Error>;
 }
 
-impl IntoCallbackResponse for () {}
-
-impl FromParams for () {}
-impl FromParams for i32 {}
-
-impl<T, U> FromParams for (T, U)
-    where T: FromParams,
-          U: FromParams
-{
+impl IntoCallbackResponse for () {
+    fn into_response(&self) -> CallbackResponse {
+        CallbackResponse::Void
+    }
 }
-
-impl<R, F> Callback<(i32, i32)> for F
-where
-    F: Fn(i32, i32) -> R + Send,
-    (i32, i32): FromParams,
-    R: IntoCallbackResponse,
-{
-    fn call(&self, params: Params) -> Result<CallbackResponse, Error> {
-        todo!()
+impl IntoCallbackResponse for i32 {
+    fn into_response(&self) -> CallbackResponse {
+        CallbackResponse::Int(*self)
     }
 }
 
-impl<R, F> Callback<i32> for F
+impl FromParams for i32 {
+    fn from(params: &mut Params) -> Self
+    {
+        match params.inner.pop_front() {
+            Some(CallbackParam::Int(i)) => i,
+            i => todo!("{:?}", i),
+        }
+    }
+}
+
+impl<R, F, P1, P2> Callback<(P1, P2)> for F
 where
-    F: Fn(i32) -> R + Send,
-    i32: FromParams,
+    F: Fn(P1, P2) -> R + Send,
+    P1: FromParams + 'static,
+    P2: FromParams + 'static,
     R: IntoCallbackResponse,
 {
-    fn call(&self, params: Params) -> Result<CallbackResponse, Error> {
-        (self as &dyn Fn(i32) -> R)(99);
-        Ok(CallbackResponse::Void)
+    fn call(&self, mut params: Params) -> Result<CallbackResponse, Error> {
+        Ok((self as &dyn Fn(P1, P2) -> R)(P1::from(&mut params), P2::from(&mut params)).into_response())
+    }
+}
+
+impl<R, P, F> Callback<P> for F
+where
+    F: Fn(P) -> R + Send,
+    P: FromParams + 'static,
+    R: IntoCallbackResponse,
+{
+    fn call(&self, mut params: Params) -> Result<CallbackResponse, Error> {
+        Ok((self as &dyn Fn(P) -> R)(P::from(&mut params)).into_response())
     }
 }
 
@@ -362,9 +403,8 @@ where
     (): std::any::Any + Send + 'static,
     R: IntoCallbackResponse,
 {
-    fn call(&self, params: Params) -> Result<CallbackResponse, Error> {
-        (self as &dyn Fn() -> R)();
-        Ok(CallbackResponse::Void)
+    fn call(&self, _params: Params) -> Result<CallbackResponse, Error> {
+        Ok((self as &dyn Fn() -> R)().into_response())
     }
 }
 
