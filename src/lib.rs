@@ -12,6 +12,7 @@ use exports::havarnov::sandkasse::runtime::*;
 bindgen!({
     path: ".",
     world: "sandkasse",
+    additional_derives: [PartialEq],
 });
 
 struct State {
@@ -224,19 +225,33 @@ impl FromJs for String {
     }
 }
 
+impl Into<ParamType> for &CallbackParam {
+    fn into(self) -> ParamType {
+        match self {
+            CallbackParam::Int(_) => ParamType::Int,
+            CallbackParam::Boolean(_) => ParamType::Boolean,
+            _ => todo!(),
+        }
+    }
+}
+
 impl SandkasseImports for State {
     fn registered_callback(&mut self, name: String, params: Vec<CallbackParam>) -> Result<CallbackResponse, CallbackError> {
         let callback = self.callbacks.get(&name).expect("get");
         let callback = callback.lock().unwrap();
-        if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<()> + Send + 'static>>() {
+
+        let param_types = params.iter().map(|i| i.into()).collect::<Vec<ParamType>>();
+
+        if params.len() == 0 {
             let callback = callback.downcast_ref::<Box<dyn Callback<()> + Send + 'static>>().expect("downcast");
             return Ok(callback.call(Params { inner: VecDeque::from(params), }).expect("foobar"));
-        }
-        else if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<i32> + Send + 'static>>() {
+        } else if param_types == vec![ParamType::Int] {
             let callback = callback.downcast_ref::<Box<dyn Callback<i32> + Send + 'static>>().expect("downcast");
             return Ok(callback.call(Params { inner: VecDeque::from(params), }).expect("foobar"));
-        }
-        else if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<(i32, i32)> + Send + 'static>>() {
+        } else if param_types == vec![ParamType::Boolean] {
+            let callback = callback.downcast_ref::<Box<dyn Callback<bool> + Send + 'static>>().expect("downcast");
+            return Ok(callback.call(Params { inner: VecDeque::from(params), }).expect("foobar"));
+        } else if param_types == vec![ParamType::Int, ParamType::Int] {
             let callback = callback.downcast_ref::<Box<dyn Callback<(i32, i32)> + Send + 'static>>().expect("downcast");
             return Ok(callback.call(Params { inner: VecDeque::from(params), }).expect("foobar"));
         }
@@ -263,32 +278,13 @@ impl Context<'_> {
         }
     }
 
-    pub fn register<P: std::any::Any + Send + 'static>(&mut self, name: String, callback: impl Callback<P> + Send + 'static) -> Result<(), Error>
+    pub fn register<P: std::any::Any + ToParamList + Send + 'static>(&mut self, name: String, callback: impl Callback<P> + Send + 'static) -> Result<(), Error>
     {
-        // let callback: Box<dyn Callback<dyn std::any::Any + Send + 'static> + Send + 'static> = Box::new(callback);
-        /*
-        */
-
         let callback: Box<dyn Callback<P> + Send + 'static> = Box::new(callback);
         let callback: Box<dyn std::any::Any + Send + 'static> = Box::new(callback);
-        // let callback = *callback.downcast::<Box<dyn Callback<dyn std::any::Any + Send + 'static> + Send + 'static>>().unwrap();
 
-
-        let param_types = if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<()> + Send + 'static>>() {
-            vec![]
-        }
-        else if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<i32> + Send + 'static>>() {
-            vec![ParamType::Int]
-        }
-        else if callback.type_id() == std::any::TypeId::of::<Box<dyn Callback<(i32, i32)> + Send + 'static>>() {
-            vec![ParamType::Int, ParamType::Int]
-        }
-        else {
-            todo!("param types");
-        };
-
+        let param_types = P::get_param_list();
         self.store.data_mut().callbacks.insert(name.clone(), Arc::new(Mutex::new(callback)));
-
 
         let request = RegisterParams { name, param_types };
         let _response = self
@@ -298,50 +294,43 @@ impl Context<'_> {
     }
 }
 
-/*
-trait IntoFunc<Params, Args> : Send + 'static {}
+pub trait ToParamList {
+    fn get_param_list() -> Vec<ParamType>;
+}
 
-trait IntoParam {}
+impl ToParamList for () {
+    fn get_param_list() -> Vec<ParamType>
+    {
+        vec![]
+    }
+}
 
-trait IntoResponse {}
-
-impl<F, P, R> IntoFunc<P, R> for F
-where
-    F: Fn(P) -> R + Send + Sync + 'static,
-    P: IntoParam,
-    R: IntoResponse,
+impl<P> ToParamList for P
+    where P: FromParams
 {
-}
-
-impl IntoResponse for () {}
-impl IntoParam for () {}
-impl IntoParam for i32 {}
-
-impl Callback for fn(i32) {
-    fn call(&self, params: Vec<CallbackParam>) -> Result<CallbackResponse, CallbackError>
+    fn get_param_list() -> Vec<ParamType>
     {
-        (self as &dyn Fn(i32) -> ())(99);
-        Ok(CallbackResponse::Void)
+        vec![P::get_param_type()]
     }
 }
 
-impl Callback for fn() {
-    fn call(&self, params: Vec<CallbackParam>) -> Result<CallbackResponse, CallbackError>
+impl<P, U> ToParamList for (P, U)
+    where P: FromParams, U: FromParams
+{
+    fn get_param_list() -> Vec<ParamType>
     {
-        (self as &dyn Fn() -> ())();
-        Ok(CallbackResponse::Void)
+        vec![P::get_param_type(), U::get_param_type()]
     }
 }
-
-*/
 
 pub struct Params
 {
     inner: VecDeque<CallbackParam>,
 }
 
-pub trait FromParams: Sized {
-    fn from(params: &mut Params) -> Self;
+pub trait FromParams {
+    fn from(params: &mut Params) -> Self where Self: Sized;
+    fn get_param_type() -> ParamType where Self: Sized;
 }
 
 pub trait IntoCallbackResponse {
@@ -364,6 +353,20 @@ impl IntoCallbackResponse for i32 {
     }
 }
 
+impl FromParams for bool {
+    fn from(params: &mut Params) -> Self
+    {
+        match params.inner.pop_front() {
+            Some(CallbackParam::Boolean(i)) => i,
+            i => todo!("{:?}", i),
+        }
+    }
+
+    fn get_param_type() -> ParamType {
+        ParamType::Boolean
+    }
+}
+
 impl FromParams for i32 {
     fn from(params: &mut Params) -> Self
     {
@@ -371,6 +374,10 @@ impl FromParams for i32 {
             Some(CallbackParam::Int(i)) => i,
             i => todo!("{:?}", i),
         }
+    }
+
+    fn get_param_type() -> ParamType {
+        ParamType::Int
     }
 }
 

@@ -78,6 +78,9 @@ fn handle_registered<'a>(
     else if value.is_int() {
         vec![CallbackParam::Int(value.as_int().unwrap())]
     }
+    else if value.is_bool() {
+        vec![CallbackParam::Boolean(value.as_bool().unwrap())]
+    }
     else {
         todo!("value to params");
     };
@@ -111,6 +114,11 @@ impl GuestCtx for RuntimeCtx {
                     .with_name(&params.name)?
                 } else if params.param_types == vec![ParamType::Int] {
                     Function::new(ctx.clone(), move |i: i32| {
+                        handle_registered(name.clone(), &ctx, i)
+                    })?
+                    .with_name(&params.name)?
+                } else if params.param_types == vec![ParamType::Boolean] {
+                    Function::new(ctx.clone(), move |i: bool| {
                         handle_registered(name.clone(), &ctx, i)
                     })?
                     .with_name(&params.name)?

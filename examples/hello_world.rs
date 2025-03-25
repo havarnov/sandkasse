@@ -36,4 +36,7 @@ fn main() {
 
     ctx.register("print".to_string(), print).expect("register");
     ctx.eval::<()>(format!("print();")).expect("eval");
+
+    ctx.register("a".to_string(), |i: bool| { println!("bool from the other side: {:?}", i); }).expect("register");
+    ctx.eval::<()>(format!("a(false);")).expect("eval");
 }
