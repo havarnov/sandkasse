@@ -27,6 +27,7 @@ impl<'a> IntoJs<'a> for CallbackResponse {
         match self {
             CallbackResponse::Void => Ok(rquickjs::Value::new_undefined(ctx.clone())),
             CallbackResponse::Int(value) => Ok(rquickjs::Value::new_int(ctx.clone(), value)),
+            CallbackResponse::Str(value) => rquickjs::String::from_str(ctx.clone(), &value).map(|s| { s.into_value() }),
             _ => todo!("rquickjs::into_js"),
         }
     }
@@ -46,6 +47,9 @@ fn handle_registered2<'a>(
     else if value.is_int() {
         vec![CallbackParam::Int(value.as_int().unwrap())]
     }
+    else if value.is_string() {
+        vec![CallbackParam::Str(value.as_string().unwrap().to_string().unwrap())]
+    }
     else {
         todo!("value to params");
     };
@@ -56,6 +60,9 @@ fn handle_registered2<'a>(
     }
     else if value.is_int() {
         params.push(CallbackParam::Int(value.as_int().unwrap()));
+    }
+    else if value.is_string() {
+        params.push(CallbackParam::Str(value.as_string().unwrap().to_string().unwrap()));
     }
     else {
         todo!("value to params");
@@ -80,6 +87,9 @@ fn handle_registered<'a>(
     }
     else if value.is_bool() {
         vec![CallbackParam::Boolean(value.as_bool().unwrap())]
+    }
+    else if value.is_string() {
+        vec![CallbackParam::Str(value.as_string().unwrap().to_string().unwrap())]
     }
     else {
         todo!("value to params");
@@ -119,6 +129,11 @@ impl GuestCtx for RuntimeCtx {
                     .with_name(&params.name)?
                 } else if params.param_types == vec![ParamType::Boolean] {
                     Function::new(ctx.clone(), move |i: bool| {
+                        handle_registered(name.clone(), &ctx, i)
+                    })?
+                    .with_name(&params.name)?
+                } else if params.param_types == vec![ParamType::Str] {
+                    Function::new(ctx.clone(), move |i: String| {
                         handle_registered(name.clone(), &ctx, i)
                     })?
                     .with_name(&params.name)?
