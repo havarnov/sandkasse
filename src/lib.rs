@@ -19,7 +19,7 @@ struct State {
     ctx: WasiCtx,
     table: ResourceTable,
     // callbacks: HashMap<String, Arc<Mutex<Box<dyn Callback<dyn std::any::Any + Send + 'static> + Send + 'static>>>>,
-    callbacks: HashMap<String, Arc<Mutex<Box<dyn std::any::Any + Send + 'static>>>>,
+    callbacks: HashMap<String, Arc<Mutex<Callable>>>,
 }
 
 impl IoView for State {
@@ -240,6 +240,10 @@ impl SandkasseImports for State {
         let callback = self.callbacks.get(&name).expect("get");
         let callback = callback.lock().unwrap();
 
+        let res = (callback.inner)(Params { inner: VecDeque::from(params) });
+        Ok(res.expect("res"))
+
+        /*
         let param_types = params.iter().map(|i| i.into()).collect::<Vec<ParamType>>();
 
         if params.len() == 0 {
@@ -255,8 +259,9 @@ impl SandkasseImports for State {
             let callback = callback.downcast_ref::<Box<dyn Callback<(i32, i32)> + Send + 'static>>().expect("downcast");
             return Ok(callback.call(Params { inner: VecDeque::from(params), }).expect("foobar"));
         }
+        */
 
-        todo!("register...");
+        // todo!("register...");
     }
 }
 
@@ -280,12 +285,15 @@ impl Context<'_> {
 
     pub fn register<P: std::any::Any + ToParamList + Send + 'static>(&mut self, name: String, callback: impl Callback<P> + Send + 'static) -> Result<(), Error>
     {
+        /*
         let callback: Box<dyn Callback<P> + Send + 'static> = Box::new(callback);
         let callback: Box<dyn std::any::Any + Send + 'static> = Box::new(callback);
+        */
 
-        let param_types = P::get_param_list();
+        let callback = callback.to_callable();
         self.store.data_mut().callbacks.insert(name.clone(), Arc::new(Mutex::new(callback)));
 
+        let param_types = P::get_param_list();
         let request = RegisterParams { name, param_types };
         let _response = self
             .ctx
@@ -339,8 +347,19 @@ pub trait IntoCallbackResponse {
 
 pub trait Callback<P: ?Sized + std::any::Any + 'static> : Send
 {
-    fn call(&self, params: Params) -> Result<CallbackResponse, Error>;
+    fn to_callable(self) -> Callable;
 }
+
+pub struct Callable {
+    inner: Box<dyn Fn(Params) -> Result<CallbackResponse, Error> + Send>,
+}
+
+/*
+    fn call(&self, mut params: Params) -> Result<CallbackResponse, Error> {
+        let x: Box<dyn Fn(Params) -> CallbackResponse> = Box::new(|mut p| {
+            let res = (self as &dyn Fn(P) -> R)(P::from(&mut p));
+            res.into_response() });
+*/
 
 impl IntoCallbackResponse for () {
     fn into_response(&self) -> CallbackResponse {
@@ -383,35 +402,62 @@ impl FromParams for i32 {
 
 impl<R, F, P1, P2> Callback<(P1, P2)> for F
 where
-    F: Fn(P1, P2) -> R + Send,
+    F: Fn(P1, P2) -> R + Send + 'static,
     P1: FromParams + 'static,
     P2: FromParams + 'static,
     R: IntoCallbackResponse,
 {
+    fn to_callable(self) -> Callable {
+        let inner: Box<dyn Fn(Params) -> Result<CallbackResponse, Error> + Send> = Box::new(move |mut p| {
+            let res = (&self as&dyn Fn(P1, P2) -> R)(P1::from(&mut p), P2::from(&mut p));
+            Ok(res.into_response()) });
+
+        Callable { inner }
+    }
+    /*
     fn call(&self, mut params: Params) -> Result<CallbackResponse, Error> {
         Ok((self as &dyn Fn(P1, P2) -> R)(P1::from(&mut params), P2::from(&mut params)).into_response())
     }
+    */
 }
 
 impl<R, P, F> Callback<P> for F
 where
-    F: Fn(P) -> R + Send,
+    F: Fn(P) -> R + Send + 'static,
     P: FromParams + 'static,
     R: IntoCallbackResponse,
 {
+    /*
     fn call(&self, mut params: Params) -> Result<CallbackResponse, Error> {
         Ok((self as &dyn Fn(P) -> R)(P::from(&mut params)).into_response())
+    }
+    */
+    fn to_callable(self) -> Callable {
+        let inner: Box<dyn Fn(Params) -> Result<CallbackResponse, Error> + Send> = Box::new(move |mut p| {
+            let res = (&self as&dyn Fn(P) -> R)(P::from(&mut p));
+            Ok(res.into_response()) });
+
+        Callable { inner }
     }
 }
 
 impl<R, F> Callback<()> for F
 where
-    F: Fn() -> R + Send,
+    F: Fn() -> R + Send + 'static,
     (): std::any::Any + Send + 'static,
     R: IntoCallbackResponse,
 {
+    fn to_callable(self) -> Callable {
+        let inner: Box<dyn Fn(Params) -> Result<CallbackResponse, Error> + Send> = Box::new(move |_p| {
+            let res = (&self as&dyn Fn() -> R)();
+            Ok(res.into_response()) });
+
+        Callable { inner }
+    }
+    /*
     fn call(&self, _params: Params) -> Result<CallbackResponse, Error> {
         Ok((self as &dyn Fn() -> R)().into_response())
     }
+    */
 }
 
