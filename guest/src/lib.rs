@@ -1,7 +1,7 @@
 use rquickjs::{Context, Function, Result as RQuickJsResult, Runtime, IntoJs};
 
 use exports::havarnov::sandkasse::runtime::{
-    Error, EvalParams, Guest, GuestCtx, RegisterParams, Response, ResponseType, ParamType
+    Error, EvalParams, Guest, GuestCtx, RegisterParams, Response, ResponseType 
 };
 
 wit_bindgen::generate!({ // W: call to unsafe function `_export_call_cabi` is unsafe and requires unsafe block: call to unsafe function
@@ -33,69 +33,39 @@ impl<'a> IntoJs<'a> for CallbackResponse {
     }
 }
 
-fn handle_registered2<'a>(
-    s: String,
-    ctx: &rquickjs::Ctx<'a>,
-    input1: impl rquickjs::IntoJs<'a>,
-    input2: impl rquickjs::IntoJs<'a>,
-) -> impl rquickjs::IntoJs<'a>
-{
-    let value = input1.into_js(ctx).expect("into_js");
-    let mut params = if value.is_undefined() {
-        vec![]
-    }
-    else if value.is_int() {
-        vec![CallbackParam::Int(value.as_int().unwrap())]
-    }
-    else if value.is_string() {
-        vec![CallbackParam::Str(value.as_string().unwrap().to_string().unwrap())]
-    }
-    else {
-        todo!("value to params");
-    };
-
-    let value = input2.into_js(ctx).expect("into_js");
-    if value.is_undefined() {
-        ()
-    }
-    else if value.is_int() {
-        params.push(CallbackParam::Int(value.as_int().unwrap()));
-    }
-    else if value.is_string() {
-        params.push(CallbackParam::Str(value.as_string().unwrap().to_string().unwrap()));
-    }
-    else {
-        todo!("value to params");
-    };
-
-    let response = registered_callback(&s, &params).expect("registered_callback");
-    response
+struct CallbackHandler {
+    name: String,
 }
 
-fn handle_registered<'a>(
-    s: String,
-    ctx: &rquickjs::Ctx<'a>,
-    input: impl rquickjs::IntoJs<'a>,
-) -> impl rquickjs::IntoJs<'a>
-{
-    let value = input.into_js(ctx).expect("into_js");
-    let params = if value.is_undefined() {
-        vec![]
+impl<'js> rquickjs::function::IntoJsFunc<'js, CallbackHandler> for CallbackHandler {
+    fn param_requirements() -> rquickjs::function::ParamRequirement {
+        rquickjs::function::ParamRequirement::any()
     }
-    else if value.is_int() {
-        vec![CallbackParam::Int(value.as_int().unwrap())]
+
+    fn call<'a>(&self, params: rquickjs::function::Params<'a, 'js>) -> Result<rquickjs::Value<'js>, rquickjs::Error> {
+
+        let mut callback_params = vec![];
+
+        for i in 0..params.len() {
+            let value = params.arg(i).expect("arg");
+
+            if value.is_int() {
+                callback_params.push(CallbackParam::Int(value.as_int().unwrap()));
+            }
+            else if value.is_string() {
+                callback_params.push(CallbackParam::Str(value.as_string().unwrap().to_string().unwrap()));
+            }
+            else if value.is_bool() {
+                callback_params.push(CallbackParam::Boolean(value.as_bool().unwrap()));
+            }
+            else {
+                todo!("value to params");
+            };
+        }
+
+        let response = registered_callback(&self.name, &callback_params).expect("registered_callback");
+        response.into_js(params.ctx())
     }
-    else if value.is_bool() {
-        vec![CallbackParam::Boolean(value.as_bool().unwrap())]
-    }
-    else if value.is_string() {
-        vec![CallbackParam::Str(value.as_string().unwrap().to_string().unwrap())]
-    }
-    else {
-        todo!("value to params");
-    };
-    let response = registered_callback(&s, &params).expect("registered_callback");
-    response
 }
 
 impl std::convert::From<rquickjs::Error> for exports::havarnov::sandkasse::runtime::Error {
@@ -112,40 +82,12 @@ impl GuestCtx for RuntimeCtx {
     }
 
     fn register(&self, params: RegisterParams) -> Result<bool, Error> {
-        let name = params.name.clone();
         self.ctx.with(|ctx| -> RQuickJsResult<()> {
             let global = ctx.globals();
             global.set(
                 params.name.to_string(),
-                if params.param_types.len() == 0 {
-                    Function::new(ctx.clone(), move || {
-                        handle_registered(name.clone(), &ctx, ())
-                    })?
-                    .with_name(&params.name)?
-                } else if params.param_types == vec![ParamType::Int] {
-                    Function::new(ctx.clone(), move |i: i32| {
-                        handle_registered(name.clone(), &ctx, i)
-                    })?
-                    .with_name(&params.name)?
-                } else if params.param_types == vec![ParamType::Boolean] {
-                    Function::new(ctx.clone(), move |i: bool| {
-                        handle_registered(name.clone(), &ctx, i)
-                    })?
-                    .with_name(&params.name)?
-                } else if params.param_types == vec![ParamType::Str] {
-                    Function::new(ctx.clone(), move |i: String| {
-                        handle_registered(name.clone(), &ctx, i)
-                    })?
-                    .with_name(&params.name)?
-                } else if params.param_types == vec![ParamType::Int, ParamType::Int] {
-                    Function::new(ctx.clone(), move |i: i32, j: i32| {
-                        handle_registered2(name.clone(), &ctx, i, j)
-                    })?
-                    .with_name(&params.name)?
-                } else
-                {
-                    todo!("uouo")
-                }
+                Function::new(ctx.clone(), CallbackHandler { name: params.name.to_string() })?
+                .with_name(&params.name)?
             )?;
             Ok(())
         })?;
