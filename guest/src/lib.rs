@@ -1,7 +1,7 @@
-use rquickjs::{Context, Function, Result as RQuickJsResult, Runtime, IntoJs};
+use rquickjs::{Context, Function, IntoJs, Result as RQuickJsResult, Runtime};
 
 use exports::havarnov::sandkasse::runtime::{
-    Error, EvalParams, Guest, GuestCtx, RegisterParams, Response, ResponseType 
+    Error, EvalParams, Guest, GuestCtx, RegisterParams, Response, ResponseType,
 };
 
 wit_bindgen::generate!({ // W: call to unsafe function `_export_call_cabi` is unsafe and requires unsafe block: call to unsafe function
@@ -27,7 +27,9 @@ impl<'a> IntoJs<'a> for CallbackResponse {
         match self {
             CallbackResponse::Void => Ok(rquickjs::Value::new_undefined(ctx.clone())),
             CallbackResponse::Int(value) => Ok(rquickjs::Value::new_int(ctx.clone(), value)),
-            CallbackResponse::Str(value) => rquickjs::String::from_str(ctx.clone(), &value).map(|s| { s.into_value() }),
+            CallbackResponse::Str(value) => {
+                rquickjs::String::from_str(ctx.clone(), &value).map(|s| s.into_value())
+            }
             _ => todo!("rquickjs::into_js"),
         }
     }
@@ -42,8 +44,10 @@ impl<'js> rquickjs::function::IntoJsFunc<'js, CallbackHandler> for CallbackHandl
         rquickjs::function::ParamRequirement::any()
     }
 
-    fn call<'a>(&self, params: rquickjs::function::Params<'a, 'js>) -> Result<rquickjs::Value<'js>, rquickjs::Error> {
-
+    fn call<'a>(
+        &self,
+        params: rquickjs::function::Params<'a, 'js>,
+    ) -> Result<rquickjs::Value<'js>, rquickjs::Error> {
         let mut callback_params = vec![];
 
         for i in 0..params.len() {
@@ -51,19 +55,19 @@ impl<'js> rquickjs::function::IntoJsFunc<'js, CallbackHandler> for CallbackHandl
 
             if value.is_int() {
                 callback_params.push(CallbackParam::Int(value.as_int().unwrap()));
-            }
-            else if value.is_string() {
-                callback_params.push(CallbackParam::Str(value.as_string().unwrap().to_string().unwrap()));
-            }
-            else if value.is_bool() {
+            } else if value.is_string() {
+                callback_params.push(CallbackParam::Str(
+                    value.as_string().unwrap().to_string().unwrap(),
+                ));
+            } else if value.is_bool() {
                 callback_params.push(CallbackParam::Boolean(value.as_bool().unwrap()));
-            }
-            else {
+            } else {
                 todo!("value to params");
             };
         }
 
-        let response = registered_callback(&self.name, &callback_params).expect("registered_callback");
+        let response =
+            registered_callback(&self.name, &callback_params).expect("registered_callback");
         response.into_js(params.ctx())
     }
 }
@@ -86,8 +90,13 @@ impl GuestCtx for RuntimeCtx {
             let global = ctx.globals();
             global.set(
                 params.name.to_string(),
-                Function::new(ctx.clone(), CallbackHandler { name: params.name.to_string() })?
-                .with_name(&params.name)?
+                Function::new(
+                    ctx.clone(),
+                    CallbackHandler {
+                        name: params.name.to_string(),
+                    },
+                )?
+                .with_name(&params.name)?,
             )?;
             Ok(())
         })?;

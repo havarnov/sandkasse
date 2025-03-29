@@ -199,46 +199,16 @@ impl Context<'_> {
         }
     }
 
-    pub fn register<P: std::any::Any + ToParamList + Send + 'static>(&mut self, name: String, callback: impl IntoCallback<P> + Send + 'static) -> Result<(), Error>
+    pub fn register<P: 'static>(&mut self, name: String, callback: impl IntoCallback<P> + Send + 'static) -> Result<(), Error>
     {
         let callback = callback.into_callable();
         self.store.data_mut().callbacks.insert(name.clone(), Arc::new(Mutex::new(callback)));
 
-        let param_types = P::get_param_list();
-        let request = RegisterParams { name, param_types };
+        let request = RegisterParams { name, };
         let _response = self
             .ctx
             .call_register(&mut self.store, self.resource, &request)?;
         Ok(())
-    }
-}
-
-pub trait ToParamList {
-    fn get_param_list() -> Vec<ParamType>;
-}
-
-impl ToParamList for () {
-    fn get_param_list() -> Vec<ParamType>
-    {
-        vec![]
-    }
-}
-
-impl<P> ToParamList for P
-    where P: FromParams
-{
-    fn get_param_list() -> Vec<ParamType>
-    {
-        vec![P::get_param_type()]
-    }
-}
-
-impl<P, U> ToParamList for (P, U)
-    where P: FromParams, U: FromParams
-{
-    fn get_param_list() -> Vec<ParamType>
-    {
-        vec![P::get_param_type(), U::get_param_type()]
     }
 }
 
@@ -249,7 +219,6 @@ pub struct Params
 
 pub trait FromParams {
     fn from(params: &mut Params) -> Self where Self: Sized;
-    fn get_param_type() -> ParamType where Self: Sized;
 }
 
 pub trait IntoCallbackResponse {
@@ -285,10 +254,6 @@ impl FromParams for String {
             i => todo!("{:?}", i),
         }
     }
-
-    fn get_param_type() -> ParamType {
-        ParamType::Str
-    }
 }
 
 impl FromParams for bool {
@@ -299,10 +264,6 @@ impl FromParams for bool {
             i => todo!("{:?}", i),
         }
     }
-
-    fn get_param_type() -> ParamType {
-        ParamType::Boolean
-    }
 }
 
 impl FromParams for i32 {
@@ -312,10 +273,6 @@ impl FromParams for i32 {
             Some(CallbackParam::Int(i)) => i,
             i => todo!("{:?}", i),
         }
-    }
-
-    fn get_param_type() -> ParamType {
-        ParamType::Int
     }
 }
 
