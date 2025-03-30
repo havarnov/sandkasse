@@ -1,8 +1,8 @@
-use rquickjs::{Context, Function, IntoJs, Result as RQuickJsResult, Runtime};
+use std::sync::{Mutex, OnceLock};
 
-use exports::havarnov::sandkasse::runtime::{
-    Error, EvalParams, Guest, GuestCtx, RegisterParams, Response, ResponseType,
-};
+use protocol::*;
+
+use rquickjs::{Context, Function, Result as RQuickJsResult, Runtime};
 
 wit_bindgen::generate!({ // W: call to unsafe function `_export_call_cabi` is unsafe and requires unsafe block: call to unsafe function
     path: "..",
@@ -10,29 +10,79 @@ wit_bindgen::generate!({ // W: call to unsafe function `_export_call_cabi` is un
     additional_derives: [PartialEq],
 });
 
-struct Component;
-
-export!(Component);
-
-impl Guest for Component {
-    type Ctx = RuntimeCtx;
-}
-
 struct RuntimeCtx {
     ctx: Context,
 }
 
-impl<'a> IntoJs<'a> for CallbackResponse {
-    fn into_js(self, ctx: &rquickjs::Ctx<'a>) -> Result<rquickjs::Value<'a>, rquickjs::Error> {
-        match self {
-            CallbackResponse::Void => Ok(rquickjs::Value::new_undefined(ctx.clone())),
-            CallbackResponse::Int(value) => Ok(rquickjs::Value::new_int(ctx.clone(), value)),
-            CallbackResponse::Str(value) => {
-                rquickjs::String::from_str(ctx.clone(), &value).map(|s| s.into_value())
-            }
-            _ => todo!("rquickjs::into_js"),
+struct RuntimeWrapper;
+
+export!(RuntimeWrapper);
+
+impl Guest for RuntimeWrapper {
+    fn eval(payload: Vec<u8>) -> Result<Vec<u8>, Vec<u8>> {
+        let request: EvalRequest = rmp_serde::from_slice(&payload).expect("from_slice");
+        let ctx = context().lock().unwrap().ctx.clone();
+        let response = match request.response_type {
+            EvalResponseType::Void => ctx.with(|ctx| -> RQuickJsResult<EvalResponse> {
+                ctx.eval::<(), _>(request.source)?;
+                Ok(EvalResponse::Void)
+            }),
+            EvalResponseType::Int => ctx.with(|ctx| -> RQuickJsResult<EvalResponse> {
+                let value = ctx.eval::<i32, _>(request.source)?;
+                Ok(EvalResponse::Int(value))
+            }),
+            EvalResponseType::Bool => ctx.with(|ctx| -> RQuickJsResult<EvalResponse> {
+                let value = ctx.eval::<bool, _>(request.source)?;
+                Ok(EvalResponse::Bool(value))
+            }),
+            EvalResponseType::String => ctx.with(|ctx| -> RQuickJsResult<EvalResponse> {
+                let value = ctx.eval::<String, _>(request.source)?;
+                Ok(EvalResponse::String(value))
+            }),
+        };
+
+        if let Ok(response) = response {
+            let bytes = rmp_serde::to_vec(&response).expect("to_vec()");
+            Ok(bytes)
+        } else {
+            todo!("panic?")
         }
     }
+
+    fn register(payload: Vec<u8>) -> Result<Vec<u8>, Vec<u8>> {
+        let request: RegisterRequest = rmp_serde::from_slice(&payload).expect("from_slice");
+        context()
+            .lock()
+            .unwrap()
+            .ctx
+            .with(|ctx| -> RQuickJsResult<()> {
+                let global = ctx.globals();
+                global.set(
+                    request.name.to_string(),
+                    Function::new(
+                        ctx.clone(),
+                        CallbackHandler {
+                            name: request.name.to_string(),
+                        },
+                    )?
+                    .with_name(&request.name)?,
+                )?;
+                Ok(())
+            })
+            .expect("with");
+        Ok(vec![])
+    }
+}
+
+unsafe impl Send for RuntimeCtx {}
+
+fn context() -> &'static Mutex<RuntimeCtx> {
+    static RUNTIME_CTX: OnceLock<Mutex<RuntimeCtx>> = OnceLock::new();
+    RUNTIME_CTX.get_or_init(|| {
+        let rt = Runtime::new().expect("create runtime");
+        let context = Context::full(&rt).expect("create context");
+        Mutex::new(RuntimeCtx { ctx: context })
+    })
 }
 
 struct CallbackHandler {
@@ -54,74 +104,37 @@ impl<'js> rquickjs::function::IntoJsFunc<'js, CallbackHandler> for CallbackHandl
             let value = params.arg(i).expect("arg");
 
             if value.is_int() {
-                callback_params.push(CallbackParam::Int(value.as_int().unwrap()));
+                callback_params.push(CallRegisteredParam::Int(value.as_int().unwrap()));
             } else if value.is_string() {
-                callback_params.push(CallbackParam::Str(
+                callback_params.push(CallRegisteredParam::String(
                     value.as_string().unwrap().to_string().unwrap(),
                 ));
             } else if value.is_bool() {
-                callback_params.push(CallbackParam::Boolean(value.as_bool().unwrap()));
+                callback_params.push(CallRegisteredParam::Bool(value.as_bool().unwrap()));
             } else {
                 todo!("value to params");
             };
         }
 
-        let response =
-            registered_callback(&self.name, &callback_params).expect("registered_callback");
-        response.into_js(params.ctx())
-    }
-}
-
-impl std::convert::From<rquickjs::Error> for exports::havarnov::sandkasse::runtime::Error {
-    fn from(e: rquickjs::Error) -> Self {
-        exports::havarnov::sandkasse::runtime::Error::Message(format!("{:?}", e))
-    }
-}
-
-impl GuestCtx for RuntimeCtx {
-    fn new() -> Self {
-        let rt = Runtime::new().expect("create runtime");
-        let context = Context::full(&rt).expect("create context");
-        RuntimeCtx { ctx: context }
-    }
-
-    fn register(&self, params: RegisterParams) -> Result<bool, Error> {
-        self.ctx.with(|ctx| -> RQuickJsResult<()> {
-            let global = ctx.globals();
-            global.set(
-                params.name.to_string(),
-                Function::new(
-                    ctx.clone(),
-                    CallbackHandler {
-                        name: params.name.to_string(),
-                    },
-                )?
-                .with_name(&params.name)?,
-            )?;
-            Ok(())
-        })?;
-        Ok(true)
-    }
-
-    fn eval(&self, req: EvalParams) -> Result<Response, Error> {
-        let value = match req.response_type {
-            ResponseType::Void => self.ctx.with(|ctx| -> RQuickJsResult<Response> {
-                ctx.eval::<(), _>(req.source)?;
-                Ok(Response::Void)
-            })?,
-            ResponseType::Int => self.ctx.with(|ctx| -> RQuickJsResult<Response> {
-                let value = ctx.eval::<i32, _>(req.source)?;
-                Ok(Response::Int(value))
-            })?,
-            ResponseType::Boolean => self.ctx.with(|ctx| -> RQuickJsResult<Response> {
-                let value = ctx.eval::<bool, _>(req.source)?;
-                Ok(Response::Boolean(value))
-            })?,
-            ResponseType::Str => self.ctx.with(|ctx| -> RQuickJsResult<Response> {
-                let value = ctx.eval::<String, _>(req.source)?;
-                Ok(Response::Str(value))
-            })?,
+        let req = CallRegisteredRequest {
+            name: self.name.to_string(),
+            params: callback_params,
         };
-        Ok(value)
+
+        let bytes = rmp_serde::to_vec(&req).expect("to_vec()");
+
+        let response = registered_callback(&bytes).expect("registered_callback");
+
+        let eval_response: EvalResponse = rmp_serde::from_slice(&response).expect("from_slice");
+
+        let ctx = params.ctx();
+        match eval_response {
+            EvalResponse::Void => Ok(rquickjs::Value::new_undefined(ctx.clone())),
+            EvalResponse::Int(value) => Ok(rquickjs::Value::new_int(ctx.clone(), value)),
+            EvalResponse::Bool(value) => Ok(rquickjs::Value::new_bool(ctx.clone(), value)),
+            EvalResponse::String(value) => {
+                rquickjs::String::from_str(ctx.clone(), &value).map(|s| s.into_value())
+            }
+        }
     }
 }

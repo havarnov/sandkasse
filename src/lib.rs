@@ -3,11 +3,10 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use wasmtime::component::*;
-use wasmtime::component::{Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::{IoView, WasiCtx, WasiCtxBuilder, WasiView};
 
-use exports::havarnov::sandkasse::runtime::*;
+use protocol::*;
 
 bindgen!({
     path: ".",
@@ -17,16 +16,15 @@ bindgen!({
 
 struct State {
     ctx: WasiCtx,
-    table: ResourceTable,
+    resource_table: ResourceTable,
     callbacks: HashMap<String, Arc<Mutex<Callable>>>,
 }
 
 impl IoView for State {
     fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
+        &mut self.resource_table
     }
 }
-
 impl WasiView for State {
     fn ctx(&mut self) -> &mut WasiCtx {
         &mut self.ctx
@@ -50,12 +48,6 @@ pub struct Runtime {
     package: Sandkasse,
 }
 
-pub struct Context<'a> {
-    store: &'a mut Store<State>,
-    ctx: GuestCtx<'a>,
-    resource: ResourceAny,
-}
-
 impl Runtime {
     pub fn new() -> Result<Self, Error> {
         let mut config = Config::default();
@@ -71,7 +63,7 @@ impl Runtime {
         let bytes = include_bytes!("../guest/target/wasm32-wasip1/release/guest.wasm");
         let component = Component::from_binary(&engine, bytes)?;
 
-        let mut linker = Linker::<State>::new(&engine);
+        let mut linker: Linker<State> = Linker::new(&engine);
         wasmtime_wasi::add_to_linker_sync(&mut linker)?;
         Sandkasse::add_to_linker(&mut linker, |state: &mut State| state)?;
 
@@ -84,26 +76,15 @@ impl Runtime {
             &engine,
             State {
                 ctx: builder.build(),
-                table: ResourceTable::new(),
+                resource_table: ResourceTable::new(),
                 callbacks: HashMap::new(),
             },
         );
         // store.set_fuel(4_000_000).expect("set fuel");
+        //
+        let package = Sandkasse::instantiate(&mut store, &component, &linker)?;
 
-       let package = Sandkasse::instantiate(&mut store, &component, &linker)?;
-
-        Ok(Runtime { store, package, })
-    }
-
-    pub fn create_ctx<'a>(&'a mut self) -> Result<Context<'a>, Error> {
-        let ctx = self.package.interface0.ctx();
-        let resource = ctx.call_constructor(&mut self.store)?;
-
-        Ok(Context {
-            store: &mut self.store,
-            ctx: ctx,
-            resource: resource,
-        })
+        Ok(Runtime { store, package })
     }
 }
 
@@ -116,7 +97,7 @@ pub enum Value {
 
 pub trait FromJs: Sized {
     fn from_js(value: Value) -> Result<Self, Error>;
-    fn response_type() -> ResponseType;
+    fn response_type() -> EvalResponseType;
 }
 
 impl FromJs for () {
@@ -127,8 +108,8 @@ impl FromJs for () {
         }
     }
 
-    fn response_type() -> ResponseType {
-        ResponseType::Void
+    fn response_type() -> EvalResponseType {
+        EvalResponseType::Void
     }
 }
 
@@ -140,8 +121,8 @@ impl FromJs for bool {
         }
     }
 
-    fn response_type() -> ResponseType {
-        ResponseType::Boolean
+    fn response_type() -> EvalResponseType {
+        EvalResponseType::Bool
     }
 }
 
@@ -153,8 +134,8 @@ impl FromJs for i32 {
         }
     }
 
-    fn response_type() -> ResponseType {
-        ResponseType::Int
+    fn response_type() -> EvalResponseType {
+        EvalResponseType::Int
     }
 }
 
@@ -166,111 +147,133 @@ impl FromJs for String {
         }
     }
 
-    fn response_type() -> ResponseType {
-        ResponseType::Str
+    fn response_type() -> EvalResponseType {
+        EvalResponseType::String
     }
 }
 
 impl SandkasseImports for State {
-    fn registered_callback(&mut self, name: String, params: Vec<CallbackParam>) -> Result<CallbackResponse, CallbackError> {
-        let callback = self.callbacks.get(&name).expect("get");
+    fn registered_callback(&mut self, payload: Vec<u8>) -> Result<Vec<u8>, Vec<u8>> {
+        let request: CallRegisteredRequest = rmp_serde::from_slice(&payload).expect("from_slice");
+
+        let callback = self.callbacks.get(&request.name).expect("get");
         let callback = callback.lock().unwrap();
 
-        let res = (callback.inner)(Params { inner: VecDeque::from(params) });
-        Ok(res.expect("res"))
+        let res = (callback.inner)(Params {
+            inner: VecDeque::from(request.params),
+        });
+        let res = res.expect("res");
+        let res = rmp_serde::to_vec(&res).expect("to_vec");
+        Ok(res)
     }
 }
 
-impl Context<'_> {
+impl Runtime {
     pub fn eval<V: FromJs>(&mut self, source: String) -> Result<V, Error> {
-        let request = EvalParams {
+        let request = EvalRequest {
             source,
             response_type: V::response_type(),
         };
+
+        let bytes = rmp_serde::to_vec(&request).expect("to_vec()");
         let response = self
-            .ctx
-            .call_eval(&mut self.store, self.resource, &request)?;
-        match response {
-            Ok(Response::Void) => V::from_js(Value::Void),
-            Ok(Response::Int(v)) => V::from_js(Value::Int(v)),
-            Ok(Response::Boolean(v)) => V::from_js(Value::Bool(v)),
-            Ok(Response::Str(v)) => V::from_js(Value::Str(v)),
+            .package
+            .call_eval(&mut self.store, &bytes)
+            .expect("call_eval")
+            .expect("call_eval_inner");
+        let eval_response: Result<EvalResponse, _> = rmp_serde::from_slice(&response);
+
+        match eval_response {
+            Ok(EvalResponse::Void) => V::from_js(Value::Void),
+            Ok(EvalResponse::Int(v)) => V::from_js(Value::Int(v)),
+            Ok(EvalResponse::Bool(v)) => V::from_js(Value::Bool(v)),
+            Ok(EvalResponse::String(v)) => V::from_js(Value::Str(v)),
             Err(e) => Err(Error::WrongType(format!("{:?}", e))),
         }
     }
 
-    pub fn register<P: 'static>(&mut self, name: String, callback: impl IntoCallback<P> + Send + 'static) -> Result<(), Error>
-    {
+    pub fn register<P: 'static>(
+        &mut self,
+        name: &str,
+        callback: impl IntoCallback<P> + Send + 'static,
+    ) -> Result<(), Error> {
         let callback = callback.into_callable();
-        self.store.data_mut().callbacks.insert(name.clone(), Arc::new(Mutex::new(callback)));
+        self.store
+            .data_mut()
+            .callbacks
+            .insert(name.to_string(), Arc::new(Mutex::new(callback)));
 
-        let request = RegisterParams { name, };
-        let _response = self
-            .ctx
-            .call_register(&mut self.store, self.resource, &request)?;
+        let request = RegisterRequest {
+            name: name.to_string(),
+        };
+        let bytes = rmp_serde::to_vec(&request).expect("to_vec()");
+        let response = self
+            .package
+            .call_register(&mut self.store, &bytes)
+            .expect("call_eval")
+            .expect("call_eval_inner");
+        assert!(response.len() == 0);
+
         Ok(())
     }
 }
 
-pub struct Params
-{
-    inner: VecDeque<CallbackParam>,
+pub struct Params {
+    inner: VecDeque<CallRegisteredParam>,
 }
 
 pub trait FromParams {
-    fn from(params: &mut Params) -> Self where Self: Sized;
+    fn from(params: &mut Params) -> Self
+    where
+        Self: Sized;
 }
 
 pub trait IntoCallbackResponse {
-    fn into_response(&self) -> CallbackResponse;
+    fn into_response(&self) -> EvalResponse;
 }
 
-pub trait IntoCallback<P: ?Sized + std::any::Any + 'static> : Send
-{
+pub trait IntoCallback<P: ?Sized + std::any::Any + 'static>: Send {
     fn into_callable(self) -> Callable;
 }
 
 pub struct Callable {
-    inner: Box<dyn Fn(Params) -> Result<CallbackResponse, Error> + Send>,
+    inner: Box<dyn Fn(Params) -> Result<EvalResponse, Error> + Send>,
 }
 
 impl IntoCallbackResponse for () {
-    fn into_response(&self) -> CallbackResponse {
-        CallbackResponse::Void
+    fn into_response(&self) -> EvalResponse {
+        EvalResponse::Void
     }
 }
 
 impl IntoCallbackResponse for i32 {
-    fn into_response(&self) -> CallbackResponse {
-        CallbackResponse::Int(*self)
+    fn into_response(&self) -> EvalResponse {
+        EvalResponse::Int(*self)
     }
 }
 
 impl FromParams for String {
-    fn from(params: &mut Params) -> Self
-    {
+    fn from(params: &mut Params) -> Self {
         match params.inner.pop_front() {
-            Some(CallbackParam::Str(i)) => i,
+            Some(CallRegisteredParam::String(i)) => i,
             i => todo!("{:?}", i),
         }
     }
 }
 
 impl FromParams for bool {
-    fn from(params: &mut Params) -> Self
-    {
+    fn from(params: &mut Params) -> Self {
         match params.inner.pop_front() {
-            Some(CallbackParam::Boolean(i)) => i,
+            Some(CallRegisteredParam::Bool(i)) => i,
             i => todo!("{:?}", i),
         }
     }
 }
 
 impl FromParams for i32 {
-    fn from(params: &mut Params) -> Self
-    {
+    fn from(params: &mut Params) -> Self {
         match params.inner.pop_front() {
-            Some(CallbackParam::Int(i)) => i,
+            Some(CallRegisteredParam::Int(i)) => i,
             i => todo!("{:?}", i),
         }
     }
@@ -284,9 +287,11 @@ where
     R: IntoCallbackResponse,
 {
     fn into_callable(self) -> Callable {
-        let inner: Box<dyn Fn(Params) -> Result<CallbackResponse, Error> + Send> = Box::new(move |mut p| {
-            let res = (&self as&dyn Fn(P1, P2) -> R)(P1::from(&mut p), P2::from(&mut p));
-            Ok(res.into_response()) });
+        let inner: Box<dyn Fn(Params) -> Result<EvalResponse, Error> + Send> =
+            Box::new(move |mut p| {
+                let res = (&self as &dyn Fn(P1, P2) -> R)(P1::from(&mut p), P2::from(&mut p));
+                Ok(res.into_response())
+            });
 
         Callable { inner }
     }
@@ -299,9 +304,11 @@ where
     R: IntoCallbackResponse,
 {
     fn into_callable(self) -> Callable {
-        let inner: Box<dyn Fn(Params) -> Result<CallbackResponse, Error> + Send> = Box::new(move |mut p| {
-            let res = (&self as&dyn Fn(P) -> R)(P::from(&mut p));
-            Ok(res.into_response()) });
+        let inner: Box<dyn Fn(Params) -> Result<EvalResponse, Error> + Send> =
+            Box::new(move |mut p| {
+                let res = (&self as &dyn Fn(P) -> R)(P::from(&mut p));
+                Ok(res.into_response())
+            });
 
         Callable { inner }
     }
@@ -314,11 +321,12 @@ where
     R: IntoCallbackResponse,
 {
     fn into_callable(self) -> Callable {
-        let inner: Box<dyn Fn(Params) -> Result<CallbackResponse, Error> + Send> = Box::new(move |_p| {
-            let res = (&self as&dyn Fn() -> R)();
-            Ok(res.into_response()) });
+        let inner: Box<dyn Fn(Params) -> Result<EvalResponse, Error> + Send> =
+            Box::new(move |_p| {
+                let res = (&self as &dyn Fn() -> R)();
+                Ok(res.into_response())
+            });
 
         Callable { inner }
     }
 }
-

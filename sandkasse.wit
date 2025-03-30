@@ -1,58 +1,7 @@
-package havarnov:sandkasse;
-
-interface runtime {
-    variant error {
-        message(string),
-    }
-
-    variant response-type {
-        void,
-        int,
-        str,
-        boolean,
-    }
-
-    variant response {
-        void,
-        int(s32),
-        str(string),
-        boolean(bool),
-    }
-
-    record register-params {
-        name: string,
-    }
-
-    record eval-params {
-        source: string,
-        response-type: response-type,
-    }
-
-    resource ctx {
-        constructor();
-        eval: func(req: eval-params) -> result<response, error>;
-        register: func(req: register-params) -> result<bool, error>;
-    }
-}
+package havarnoc:sandkasse;
 
 world sandkasse {
-    variant callback-param {
-        int(s32),
-        str(string),
-        boolean(bool),
-    }
-
-    variant callback-response {
-        void,
-        int(s32),
-        str(string),
-        boolean(bool),
-    }
-
-    variant callback-error {
-        message(string),
-    }
-
-    import registered-callback: func(name: string, params: list<callback-param>) -> result<callback-response, callback-error>;
-    export runtime;
+    import registered-callback: func(payload: list<u8>) -> result<list<u8>, list<u8>>;
+    export eval: func(payload: list<u8>) -> result<list<u8>, list<u8>>;
+    export register: func(payload: list<u8>) -> result<list<u8>, list<u8>>;
 }

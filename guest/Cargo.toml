@@ -8,4 +8,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 rquickjs = { version = "0.9.0" }
-wit-bindgen = "0.40.0"
+protocol = { path = "../protocol" }
+rmp-serde = "1.3.0"
+wit-bindgen = "0.41.0"
